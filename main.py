@@ -2,13 +2,27 @@ import os
 import re
 import math
 import ast
+import json
 import operator as op
 import threading
 import datetime
 from flask import Flask
 
-from telegram import Update, ReplyKeyboardMarkup, ChatPermissions
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    ChatPermissions,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+    CallbackQueryHandler,
+)
 
 # ================= WEB SERVER FOR RENDER FREE =================
 web_app = Flask(__name__)
@@ -26,21 +40,27 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("BOT_TOKEN missing")
 
+DATA_FILE = "bot_data.json"
+
 USDT_RATE = 83.5
 PROFIT = 2.0
 ROUND_VALUE = 50
 
-ANTI_SPAM = True
-ANTI_LINK = True
 WARNS = {}
-
-# Auto shop time per group
 GROUP_SETTINGS = {}
+
 DEFAULT_OPEN_HOUR = 8
 DEFAULT_CLOSE_HOUR = 20
 
-OPEN_MSG = "🌅 ပြန်ဖွင့်ပါပြီ\nOwner အားပါပြီ။ လိုတာများအကုန် အစုံ ရပါမယ်ရှင့် 🤗"
-CLOSE_MSG = "🌙 Owner အလုပ်ရှုပ်နေလို့ ခဏပိတ်ထားပါတယ်ရှင့်။"
+OPEN_MSG = """🌅 မင်္ဂလာနံနက်ခင်းပါရှင့်
+
+Diamond / UC order များကို ယနေ့အတွက် ပြန်လည်လက်ခံပေးနေပါပြီ 💎
+လိုအပ်တာများကို လွတ်လပ်စွာ မေးမြန်းနိုင်ပါတယ်ရှင် 🙏"""
+
+CLOSE_MSG = """🌙 ဒီနေ့အတွက် order လက်ခံမှုကို ယာယီပိတ်ထားပါပြီရှင့်
+
+မနက်ဖြန်ပြန်လည်ဖွင့်လှစ်ပေးပါမယ် 💎
+အားပေးမှုအတွက် ကျေးဇူးအများကြီးတင်ပါတယ် 🙏"""
 
 WELCOME_MSG = """👋 Hello ကြိုဆိုပါတယ်ရှင့်
 
@@ -70,19 +90,54 @@ KEYBOARD = ReplyKeyboardMarkup(
     [
         ["📋 Pack List", "💎 Price List"],
         ["🌅 ဆိုင်ဖွင့်", "🌙 ဆိုင်ပိတ်"],
-        ["🧮 Calculator Help", "ℹ️ Help"],
+        ["⚙️ Settings", "ℹ️ Help"],
     ],
-    resize_keyboard=True
+    resize_keyboard=True,
 )
 
-# ================= GROUP SETTINGS =================
+# ================= JSON SAVE =================
+def load_data():
+    global GROUP_SETTINGS, WARNS
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            GROUP_SETTINGS = {int(k): v for k, v in data.get("groups", {}).items()}
+            WARNS = data.get("warns", {})
+    except Exception:
+        GROUP_SETTINGS = {}
+        WARNS = {}
+
+def save_data():
+    data = {
+        "groups": {str(k): v for k, v in GROUP_SETTINGS.items()},
+        "warns": WARNS,
+    }
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 def get_group_setting(chat_id):
-    return GROUP_SETTINGS.setdefault(chat_id, {
-        "open_hour": DEFAULT_OPEN_HOUR,
-        "close_hour": DEFAULT_CLOSE_HOUR,
-        "last_open_date": None,
-        "last_close_date": None,
-    })
+    if chat_id not in GROUP_SETTINGS:
+        GROUP_SETTINGS[chat_id] = {
+            "open_hour": DEFAULT_OPEN_HOUR,
+            "close_hour": DEFAULT_CLOSE_HOUR,
+            "last_open_date": None,
+            "last_close_date": None,
+            "anti_spam": True,
+            "anti_link": True,
+        }
+        save_data()
+    return GROUP_SETTINGS[chat_id]
+
+# ================= ADMIN CHECK =================
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+    return member.status in ["administrator", "creator"]
+
+async def admin_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update, context):
+        await update.effective_message.reply_text("❌ Admin တွေပဲ သုံးလို့ရပါတယ်။")
+        return False
+    return True
 
 # ================= CALC FUNCTIONS =================
 def round_50(amount):
@@ -182,6 +237,81 @@ def price_list_text():
     lines.append("╚════════════════════╝")
     return "\n".join(lines)
 
+# ================= SETTINGS BUTTON UI =================
+def settings_keyboard(setting):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🌅 Open 8AM", callback_data="open_8"),
+            InlineKeyboardButton("🌅 Open 9AM", callback_data="open_9"),
+        ],
+        [
+            InlineKeyboardButton("🌅 Open 10AM", callback_data="open_10"),
+            InlineKeyboardButton("🌅 Open 11AM", callback_data="open_11"),
+        ],
+        [
+            InlineKeyboardButton("🌙 Close 8PM", callback_data="close_20"),
+            InlineKeyboardButton("🌙 Close 9PM", callback_data="close_21"),
+        ],
+        [
+            InlineKeyboardButton("🌙 Close 10PM", callback_data="close_22"),
+            InlineKeyboardButton("🌙 Close 11PM", callback_data="close_23"),
+        ],
+        [
+            InlineKeyboardButton(
+                f"🛡 AntiSpam {'ON' if setting.get('anti_spam', True) else 'OFF'}",
+                callback_data="toggle_spam"
+            ),
+            InlineKeyboardButton(
+                f"🔗 Link {'ON' if setting.get('anti_link', True) else 'OFF'}",
+                callback_data="toggle_link"
+            ),
+        ],
+    ])
+
+async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await admin_only(update, context):
+        return
+
+    setting = get_group_setting(update.effective_chat.id)
+    await update.message.reply_text(
+        f"⚙️ Group Settings\n\n"
+        f"🌅 Open: {setting['open_hour']}:00\n"
+        f"🌙 Close: {setting['close_hour']}:00\n"
+        f"🛡 AntiSpam: {'ON' if setting.get('anti_spam', True) else 'OFF'}\n"
+        f"🔗 Link Block: {'ON' if setting.get('anti_link', True) else 'OFF'}",
+        reply_markup=settings_keyboard(setting)
+    )
+
+async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    member = await context.bot.get_chat_member(query.message.chat.id, query.from_user.id)
+    if member.status not in ["administrator", "creator"]:
+        return await query.edit_message_text("❌ Admin တွေပဲ သုံးလို့ရပါတယ်။")
+
+    setting = get_group_setting(query.message.chat.id)
+
+    if query.data.startswith("open_"):
+        setting["open_hour"] = int(query.data.split("_")[1])
+    elif query.data.startswith("close_"):
+        setting["close_hour"] = int(query.data.split("_")[1])
+    elif query.data == "toggle_spam":
+        setting["anti_spam"] = not setting.get("anti_spam", True)
+    elif query.data == "toggle_link":
+        setting["anti_link"] = not setting.get("anti_link", True)
+
+    save_data()
+
+    await query.edit_message_text(
+        f"✅ Updated\n\n"
+        f"🌅 Open: {setting['open_hour']}:00\n"
+        f"🌙 Close: {setting['close_hour']}:00\n"
+        f"🛡 AntiSpam: {'ON' if setting.get('anti_spam', True) else 'OFF'}\n"
+        f"🔗 Link Block: {'ON' if setting.get('anti_link', True) else 'OFF'}",
+        reply_markup=settings_keyboard(setting)
+    )
+
 # ================= COMMANDS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_group_setting(update.effective_chat.id)
@@ -196,14 +326,13 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /price - Price List
 /open - ဆိုင်ဖွင့်
 /close - ဆိုင်ပိတ်
+/settings - Button Settings
+/time - Auto Time ကြည့်
+/settime 8 20 - Time ပြောင်း
 
 Shortcut:
 O - ဆိုင်ဖွင့်
 C - ဆိုင်ပိတ်
-
-Auto Time:
-/time - လက်ရှိချိန်ကြည့်
-/settime 8 20 - 8AM ဖွင့် / 8PM ပိတ်
 
 Normal Calculator:
 /calc 2+3*5
@@ -218,12 +347,6 @@ meb
 
 Rate ပြောင်းရန်:
 83.5+2%
-
-Anti Spam:
-/antispam on
-/antispam off
-/antilink on
-/antilink off
 
 Group Control:
 /mute USER_ID
@@ -269,11 +392,13 @@ async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(price_list_text())
 
 async def open_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    get_group_setting(update.effective_chat.id)
+    if not await admin_only(update, context):
+        return
     await update.message.reply_text(OPEN_MSG)
 
 async def close_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    get_group_setting(update.effective_chat.id)
+    if not await admin_only(update, context):
+        return
     await update.message.reply_text(CLOSE_MSG)
 
 async def time_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -285,7 +410,8 @@ async def time_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def settime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    get_group_setting(update.effective_chat.id)
+    if not await admin_only(update, context):
+        return
 
     if len(context.args) != 2:
         return await update.message.reply_text("Usage: /settime 8 20")
@@ -300,6 +426,7 @@ async def settime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         setting = get_group_setting(update.effective_chat.id)
         setting["open_hour"] = open_hour
         setting["close_hour"] = close_hour
+        save_data()
 
         await update.message.reply_text(
             f"✅ Auto ဆိုင်ချိန် ပြောင်းပြီးပါပြီ\n\n"
@@ -319,21 +446,9 @@ async def calc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_text("❌ Calculator error")
 
-async def antispam_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global ANTI_SPAM
-    if not context.args or context.args[0].lower() not in ["on", "off"]:
-        return await update.message.reply_text("Usage: /antispam on OR /antispam off")
-    ANTI_SPAM = context.args[0].lower() == "on"
-    await update.message.reply_text(f"🛡 Anti Spam: {'ON' if ANTI_SPAM else 'OFF'}")
-
-async def antilink_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global ANTI_LINK
-    if not context.args or context.args[0].lower() not in ["on", "off"]:
-        return await update.message.reply_text("Usage: /antilink on OR /antilink off")
-    ANTI_LINK = context.args[0].lower() == "on"
-    await update.message.reply_text(f"🔗 Anti Link: {'ON' if ANTI_LINK else 'OFF'}")
-
 async def mute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await admin_only(update, context):
+        return
     if not context.args:
         return await update.message.reply_text("Usage: /mute USER_ID")
     try:
@@ -348,6 +463,8 @@ async def mute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Mute error: {e}")
 
 async def unmute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await admin_only(update, context):
+        return
     if not context.args:
         return await update.message.reply_text("Usage: /unmute USER_ID")
     try:
@@ -373,13 +490,19 @@ async def unmute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Unmute error: {e}")
 
 async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await admin_only(update, context):
+        return
     if not update.message.reply_to_message:
         return await update.message.reply_text("⚠️ /warn ကို user message ကို reply ထောက်ပြီးသုံးပါ")
-    user = update.message.reply_to_message.from_user
-    WARNS[user.id] = WARNS.get(user.id, 0) + 1
-    await update.message.reply_text(f"⚠️ {user.first_name} Warn: {WARNS[user.id]}/3")
 
-    if WARNS[user.id] >= 3:
+    user = update.message.reply_to_message.from_user
+    key = f"{update.effective_chat.id}:{user.id}"
+    WARNS[key] = WARNS.get(key, 0) + 1
+    save_data()
+
+    await update.message.reply_text(f"⚠️ {user.first_name} Warn: {WARNS[key]}/3")
+
+    if WARNS[key] >= 3:
         await context.bot.restrict_chat_member(
             update.effective_chat.id,
             user.id,
@@ -390,9 +513,12 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def warnings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
         return await update.message.reply_text("⚠️ /warnings ကို reply ထောက်ပြီးသုံးပါ")
-    user = update.message.reply_to_message.from_user
-    await update.message.reply_text(f"⚠️ {user.first_name} warnings: {WARNS.get(user.id, 0)}/3")
 
+    user = update.message.reply_to_message.from_user
+    key = f"{update.effective_chat.id}:{user.id}"
+    await update.message.reply_text(f"⚠️ {user.first_name} warnings: {WARNS.get(key, 0)}/3")
+
+# ================= AUTO SHOP TIME =================
 async def auto_shop_time(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.datetime.now()
     today = str(now.date())
@@ -401,10 +527,12 @@ async def auto_shop_time(context: ContextTypes.DEFAULT_TYPE):
         if now.hour == setting["open_hour"] and setting["last_open_date"] != today:
             await context.bot.send_message(chat_id=chat_id, text=OPEN_MSG)
             setting["last_open_date"] = today
+            save_data()
 
         if now.hour == setting["close_hour"] and setting["last_close_date"] != today:
             await context.bot.send_message(chat_id=chat_id, text=CLOSE_MSG)
             setting["last_close_date"] = today
+            save_data()
 
 # ================= TEXT HANDLER =================
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -413,15 +541,19 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
-    get_group_setting(update.effective_chat.id)
+    setting = get_group_setting(update.effective_chat.id)
 
     text = update.message.text.strip()
     lower = text.lower()
 
     if lower == "c":
+        if not await admin_only(update, context):
+            return
         return await update.message.reply_text(CLOSE_MSG)
 
     if lower == "o":
+        if not await admin_only(update, context):
+            return
         return await update.message.reply_text(OPEN_MSG)
 
     if text == "📋 Pack List":
@@ -436,14 +568,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🌙 ဆိုင်ပိတ်":
         return await close_cmd(update, context)
 
+    if text == "⚙️ Settings":
+        return await settings_cmd(update, context)
+
     if text == "ℹ️ Help":
         return await help_cmd(update, context)
 
-    if text == "🧮 Calculator Help":
-        return await update.message.reply_text("🧮 Normal calculator သုံးရန်\n/calc 2+3*5\nသို့မဟုတ် 2+3*5")
-
-    if ANTI_SPAM:
-        if ANTI_LINK and re.search(r"(https?://|t\.me/|telegram\.me/|www\.)", lower):
+    if setting.get("anti_spam", True):
+        if setting.get("anti_link", True) and re.search(r"(https?://|t\.me/|telegram\.me/|www\.)", lower):
             try:
                 await update.message.delete()
             except Exception:
@@ -459,6 +591,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rate_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*\+\s*(\d+(?:\.\d+)?)%", text)
     if rate_match:
+        if not await admin_only(update, context):
+            return
+
         rate = float(rate_match.group(1))
         profit = float(rate_match.group(2))
 
@@ -492,6 +627,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= MAIN =================
 def main():
+    load_data()
     threading.Thread(target=run_web, daemon=True).start()
 
     app = Application.builder().token(TOKEN).build()
@@ -502,15 +638,16 @@ def main():
     app.add_handler(CommandHandler("price", price_cmd))
     app.add_handler(CommandHandler("open", open_cmd))
     app.add_handler(CommandHandler("close", close_cmd))
+    app.add_handler(CommandHandler("settings", settings_cmd))
     app.add_handler(CommandHandler("time", time_cmd))
     app.add_handler(CommandHandler("settime", settime_cmd))
     app.add_handler(CommandHandler("calc", calc_cmd))
-    app.add_handler(CommandHandler("antispam", antispam_cmd))
-    app.add_handler(CommandHandler("antilink", antilink_cmd))
     app.add_handler(CommandHandler("mute", mute_cmd))
     app.add_handler(CommandHandler("unmute", unmute_cmd))
     app.add_handler(CommandHandler("warn", warn_cmd))
     app.add_handler(CommandHandler("warnings", warnings_cmd))
+
+    app.add_handler(CallbackQueryHandler(settings_callback))
 
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome))
     app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, left))
