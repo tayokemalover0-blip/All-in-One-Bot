@@ -693,10 +693,8 @@ def main():
     app.add_handler(CommandHandler("warn", warn_cmd))
     app.add_handler(CommandHandler("warnings", warnings_cmd))
 
-    app.add_handler(CallbackQueryHandler(settings_callback))
-
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome))
-    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, left))
+    app.add_handler(CallbackQueryHandler(settings_callback)) 
+    
     app.add_handler(ChatMemberHandler(member_status, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
