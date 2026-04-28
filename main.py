@@ -22,6 +22,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
     CallbackQueryHandler,
+    ChatMemberHandler,
 )
 
 web_app = Flask(__name__)
@@ -363,8 +364,8 @@ Rate ပြောင်းရန်:
 83.5+2%
 
 Group Control:
-/mute USER_ID
-/unmute USER_ID
+/mute reply
+/unmute reply
 /warn reply
 /warnings reply
 """,
@@ -394,6 +395,40 @@ async def left(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🆔 ID: {user.id}\n"
         f"🔗 Username: {username}"
     )
+
+async def member_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    old = update.chat_member.old_chat_member.status
+    new = update.chat_member.new_chat_member.status
+    user = update.chat_member.new_chat_member.user
+
+    get_group_setting(chat.id)
+
+    username = f"@{user.username}" if user.username else "No username"
+
+    if old in ["left", "kicked"] and new in ["member", "administrator", "creator", "restricted"]:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=(
+                f"{WELCOME_MSG}\n\n"
+                f"📥 Join Info\n"
+                f"👤 Name: {user.first_name}\n"
+                f"🆔 ID: {user.id}\n"
+                f"🔗 Username: {username}"
+            )
+        )
+
+    elif old in ["member", "administrator", "creator", "restricted"] and new in ["left", "kicked"]:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=(
+                f"{LEFT_MSG}\n\n"
+                f"📤 Left Info\n"
+                f"👤 Name: {user.first_name}\n"
+                f"🆔 ID: {user.id}\n"
+                f"🔗 Username: {username}"
+            )
+        )
 
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_group_setting(update.effective_chat.id)
@@ -458,26 +493,40 @@ async def calc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def mute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update, context):
         return
-    if not context.args:
-        return await update.message.reply_text("Usage: /mute USER_ID")
+
     try:
-        uid = int(context.args[0])
+        if update.message.reply_to_message:
+            uid = update.message.reply_to_message.from_user.id
+            name = update.message.reply_to_message.from_user.first_name
+        elif context.args:
+            uid = int(context.args[0])
+            name = str(uid)
+        else:
+            return await update.message.reply_text("Usage: user message ကို reply ထောက်ပြီး /mute ရိုက်ပါ")
+
         await context.bot.restrict_chat_member(
             update.effective_chat.id,
             uid,
             permissions=ChatPermissions(can_send_messages=False)
         )
-        await update.message.reply_text("🔇 Muted ပါပြီ")
+        await update.message.reply_text(f"🔇 {name} muted ပါပြီ")
     except Exception as e:
         await update.message.reply_text(f"❌ Mute error: {e}")
 
 async def unmute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update, context):
         return
-    if not context.args:
-        return await update.message.reply_text("Usage: /unmute USER_ID")
+
     try:
-        uid = int(context.args[0])
+        if update.message.reply_to_message:
+            uid = update.message.reply_to_message.from_user.id
+            name = update.message.reply_to_message.from_user.first_name
+        elif context.args:
+            uid = int(context.args[0])
+            name = str(uid)
+        else:
+            return await update.message.reply_text("Usage: user message ကို reply ထောက်ပြီး /unmute ရိုက်ပါ")
+
         await context.bot.restrict_chat_member(
             update.effective_chat.id,
             uid,
@@ -494,7 +543,7 @@ async def unmute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 can_add_web_page_previews=True,
             )
         )
-        await update.message.reply_text("🔊 Unmuted ပါပြီ")
+        await update.message.reply_text(f"🔊 {name} unmuted ပါပြီ")
     except Exception as e:
         await update.message.reply_text(f"❌ Unmute error: {e}")
 
@@ -648,6 +697,7 @@ def main():
 
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome))
     app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, left))
+    app.add_handler(ChatMemberHandler(member_status, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
     app.job_queue.run_repeating(auto_shop_time, interval=60, first=10)
