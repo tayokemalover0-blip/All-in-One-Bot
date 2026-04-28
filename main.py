@@ -135,6 +135,30 @@ async def admin_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return False
     return True
 
+async def open_group_permissions(bot, chat_id):
+    await bot.set_chat_permissions(
+        chat_id=chat_id,
+        permissions=ChatPermissions(
+            can_send_messages=True,
+            can_send_audios=True,
+            can_send_documents=True,
+            can_send_photos=True,
+            can_send_videos=True,
+            can_send_video_notes=True,
+            can_send_voice_notes=True,
+            can_send_polls=True,
+            can_send_other_messages=True,
+            can_add_web_page_previews=True,
+            can_invite_users=True,
+        )
+    )
+
+async def close_group_permissions(bot, chat_id):
+    await bot.set_chat_permissions(
+        chat_id=chat_id,
+        permissions=ChatPermissions(can_send_messages=False)
+    )
+
 def round_50(amount):
     return int(math.ceil(amount / ROUND_VALUE) * ROUND_VALUE)
 
@@ -382,12 +406,14 @@ async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def open_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update, context):
         return
+    await open_group_permissions(context.bot, update.effective_chat.id)
     await update.message.reply_text(OPEN_MSG)
 
 async def close_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update, context):
         return
     await update.message.reply_text(CLOSE_MSG)
+    await close_group_permissions(context.bot, update.effective_chat.id)
 
 async def time_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     setting = get_group_setting(update.effective_chat.id)
@@ -503,12 +529,14 @@ async def auto_shop_time(context: ContextTypes.DEFAULT_TYPE):
 
     for chat_id, setting in GROUP_SETTINGS.items():
         if now.hour == setting["open_hour"] and setting["last_open_date"] != today:
+            await open_group_permissions(context.bot, chat_id)
             await context.bot.send_message(chat_id=chat_id, text=OPEN_MSG)
             setting["last_open_date"] = today
             save_data()
 
         if now.hour == setting["close_hour"] and setting["last_close_date"] != today:
             await context.bot.send_message(chat_id=chat_id, text=CLOSE_MSG)
+            await close_group_permissions(context.bot, chat_id)
             setting["last_close_date"] = today
             save_data()
 
@@ -526,12 +554,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if lower == "o" or "ဆိုင်ဖွ" in text:
         if not await admin_only(update, context):
             return
+        await open_group_permissions(context.bot, update.effective_chat.id)
         return await update.message.reply_text(OPEN_MSG)
 
     if lower == "c" or "ဆိုင်ပိတ်" in text:
         if not await admin_only(update, context):
             return
-        return await update.message.reply_text(CLOSE_MSG)
+        await update.message.reply_text(CLOSE_MSG)
+        return await close_group_permissions(context.bot, update.effective_chat.id)
 
     if text == "📋 Pack List":
         return await list_cmd(update, context)
