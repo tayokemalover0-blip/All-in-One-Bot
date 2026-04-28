@@ -4,25 +4,24 @@ import math
 import ast
 import operator as op
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
-    raise ValueError("BOT_TOKEN env ထည့်ပါ")
+    raise ValueError("BOT_TOKEN missing")
 
 USDT_RATE = 83.5
 PROFIT = 2.0
 ROUND_VALUE = 50
-
 ANTI_SPAM = True
 ANTI_LINK = True
 
 OPEN_MSG = "🌅 ပြန်ဖွင့်ပါပြီ\nOwner အားပါပြီ။ လိုတာများအကုန် အစုံ ရပါမယ်ရှင့် 🤗"
 CLOSE_MSG = "🌙 Owner အလုပ်ရှုပ်နေလို့ ခဏပိတ်ထားပါတယ်ရှင့်။"
 
-WELCOME_MSG = """👋 ကြိုဆိုပါတယ်ရှင့်
+WELCOME_MSG = """👋 Hello ကြိုဆိုပါတယ်ရှင့်
 
-💎 Diamond / Bundle / Pass များ မေးမြန်းနိုင်ပါတယ်ရှင့်
+💎 Diamond / UC / Bundle / Pass များ မေးမြန်းနိုင်ပါတယ်ရှင့်
 ✅ Bot Ready ပါပြီ"""
 
 LEFT_MSG = "👋 Goodbye ပါရှင့်"
@@ -53,20 +52,26 @@ KEYBOARD = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-def round_50(amount: float) -> int:
+def round_50(amount):
     return int(math.ceil(amount / ROUND_VALUE) * ROUND_VALUE)
 
-def diamond_mmk(usdt: float) -> int:
+def diamond_mmk(usdt):
     return round_50(usdt * USDT_RATE * (1 + PROFIT / 100))
 
-# safe normal calculator
 OPS = {
-    ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv,
-    ast.Pow: op.pow, ast.Mod: op.mod, ast.USub: op.neg
+    ast.Add: op.add,
+    ast.Sub: op.sub,
+    ast.Mult: op.mul,
+    ast.Div: op.truediv,
+    ast.Pow: op.pow,
+    ast.Mod: op.mod,
+    ast.USub: op.neg,
 }
 
-def safe_calc(expr: str):
+def safe_calc(expr):
     def eval_node(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
         if isinstance(node, ast.Num):
             return node.n
         if isinstance(node, ast.BinOp):
@@ -128,12 +133,11 @@ def pack_list_text():
 def price_list_text():
     lines = [
         "╔══〔 𝗗𝗜𝗔𝗠𝗢𝗡𝗗 𝗣𝗥𝗜𝗖𝗘 𝗟𝗜𝗦𝗧 〕══╗",
-        f"💱 Rate: {USDT_RATE}",
-        f"📈 Profit: {PROFIT}%",
-        f"🔁 Round: {ROUND_VALUE}",
+        f"💱 USDT Rate - {USDT_RATE}",
+        f"📈 Profit - {PROFIT}%",
+        f"🧾 Round - {ROUND_VALUE}",
         ""
     ]
-
     shown = set()
     for name, usdt in PACKS.items():
         if name == "twilight pass" or name in shown:
@@ -141,7 +145,6 @@ def price_list_text():
         shown.add(name)
         display = "Twillight Pass" if name == "twillight pass" else name
         lines.append(f"💎 {display} ➜ {diamond_mmk(usdt):,} MMK")
-
     lines.append("╚════════════════════╝")
     return "\n".join(lines)
 
@@ -152,17 +155,19 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         """📌 အသုံးပြုပုံ
 
-📋 Pack List - USDT pack list
-💎 Price List - MMK price list
+📋 Pack List / /list
+💎 Price List / /price
 
 ဆိုင်ဖွင့်/ပိတ်:
 O
 C
+/open
+/close
 
-Normal calculator:
+Normal Calculator:
 /calc 2+3*5
 
-Diamond calculator:
+Diamond Calculator:
 86
 172
 500+500
@@ -172,7 +177,7 @@ meb
 Rate ပြောင်းရန်:
 83.5+2%
 
-Anti spam:
+Anti Spam:
 /antispam on
 /antispam off
 /antilink on
@@ -190,18 +195,18 @@ async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def left(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.left_chat_member
-    await update.message.reply_text(f"{LEFT_MSG}\n👤 Name: {user.first_name}")
+    await update.message.reply_text(f"{LEFT_MSG}\n👤 Name: {user.first_name}\n🆔 ID: {user.id}")
 
-async def pack_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(pack_list_text())
 
-async def price_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(price_list_text())
 
-async def open_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def open_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(OPEN_MSG)
 
-async def close_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def close_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(CLOSE_MSG)
 
 async def calc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -212,7 +217,7 @@ async def calc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = safe_calc(expr)
         await update.message.reply_text(f"🧮 {expr} = {result}")
     except Exception:
-        await update.message.reply_text("❌ Calculator error") 
+        await update.message.reply_text("❌ Calculator error")
 
 async def antispam_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ANTI_SPAM
@@ -244,16 +249,16 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(OPEN_MSG)
 
     if text == "📋 Pack List":
-        return await pack_list(update, context)
+        return await list_cmd(update, context)
 
     if text == "💎 Price List":
-        return await price_list(update, context)
+        return await price_cmd(update, context)
 
     if text == "🌅 ဆိုင်ဖွင့်":
-        return await open_shop(update, context)
+        return await open_cmd(update, context)
 
     if text == "🌙 ဆိုင်ပိတ်":
-        return await close_shop(update, context)
+        return await close_cmd(update, context)
 
     if text == "ℹ️ Help":
         return await help_cmd(update, context)
@@ -291,8 +296,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(price_list_text())
 
     if lower in PACKS:
-        display = "Twillight Pass" if lower in ["twillight pass", "twilight pass"] else text
         usdt = PACKS[lower]
+        display = "Twillight Pass" if lower in ["twillight pass", "twilight pass"] else text
         return await update.message.reply_text(
             f"💎 {display}\n"
             f"USDT: {usdt:.2f}\n"
@@ -301,15 +306,23 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"➡️ {diamond_mmk(usdt):,} MMK"
         )
 
+    if re.fullmatch(r"[0-9+\-*/(). %]+", text):
+        try:
+            expr = text.replace("%", "/100")
+            result = safe_calc(expr)
+            return await update.message.reply_text(f"🧮 {text} = {result}")
+        except Exception:
+            return
+
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("list", pack_list))
-    app.add_handler(CommandHandler("price", price_list))
-    app.add_handler(CommandHandler("open", open_shop))
-    app.add_handler(CommandHandler("close", close_shop))
+    app.add_handler(CommandHandler("list", list_cmd))
+    app.add_handler(CommandHandler("price", price_cmd))
+    app.add_handler(CommandHandler("open", open_cmd))
+    app.add_handler(CommandHandler("close", close_cmd))
     app.add_handler(CommandHandler("calc", calc_cmd))
     app.add_handler(CommandHandler("antispam", antispam_cmd))
     app.add_handler(CommandHandler("antilink", antilink_cmd))
