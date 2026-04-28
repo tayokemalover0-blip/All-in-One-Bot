@@ -4,6 +4,7 @@ import math
 import ast
 import operator as op
 import threading
+import datetime
 from flask import Flask
 
 from telegram import Update, ReplyKeyboardMarkup, ChatPermissions
@@ -32,6 +33,11 @@ ROUND_VALUE = 50
 ANTI_SPAM = True
 ANTI_LINK = True
 WARNS = {}
+
+# Auto shop time per group
+GROUP_SETTINGS = {}
+DEFAULT_OPEN_HOUR = 8
+DEFAULT_CLOSE_HOUR = 20
 
 OPEN_MSG = "🌅 ပြန်ဖွင့်ပါပြီ\nOwner အားပါပြီ။ လိုတာများအကုန် အစုံ ရပါမယ်ရှင့် 🤗"
 CLOSE_MSG = "🌙 Owner အလုပ်ရှုပ်နေလို့ ခဏပိတ်ထားပါတယ်ရှင့်။"
@@ -68,6 +74,15 @@ KEYBOARD = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True
 )
+
+# ================= GROUP SETTINGS =================
+def get_group_setting(chat_id):
+    return GROUP_SETTINGS.setdefault(chat_id, {
+        "open_hour": DEFAULT_OPEN_HOUR,
+        "close_hour": DEFAULT_CLOSE_HOUR,
+        "last_open_date": None,
+        "last_close_date": None,
+    })
 
 # ================= CALC FUNCTIONS =================
 def round_50(amount):
@@ -169,9 +184,11 @@ def price_list_text():
 
 # ================= COMMANDS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    get_group_setting(update.effective_chat.id)
     await update.message.reply_text("🤖 Public Bot Ready ပါပြီရှင့်", reply_markup=KEYBOARD)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    get_group_setting(update.effective_chat.id)
     await update.message.reply_text(
         """📌 အသုံးပြုပုံ
 
@@ -183,6 +200,10 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Shortcut:
 O - ဆိုင်ဖွင့်
 C - ဆိုင်ပိတ်
+
+Auto Time:
+/time - လက်ရှိချိန်ကြည့်
+/settime 8 20 - 8AM ဖွင့် / 8PM ပိတ်
 
 Normal Calculator:
 /calc 2+3*5
@@ -214,27 +235,79 @@ Group Control:
     )
 
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    get_group_setting(update.effective_chat.id)
+
     for user in update.message.new_chat_members:
         username = f"@{user.username}" if user.username else "No username"
         await update.message.reply_text(
-            f"{WELCOME_MSG}\n\n👤 Name: {user.first_name}\n🆔 ID: {user.id}\n🔗 Username: {username}"
+            f"{WELCOME_MSG}\n\n"
+            f"📥 Join Info\n"
+            f"👤 Name: {user.first_name}\n"
+            f"🆔 ID: {user.id}\n"
+            f"🔗 Username: {username}"
         )
 
 async def left(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    get_group_setting(update.effective_chat.id)
+
     user = update.message.left_chat_member
-    await update.message.reply_text(f"{LEFT_MSG}\n👤 Name: {user.first_name}\n🆔 ID: {user.id}")
+    username = f"@{user.username}" if user.username else "No username"
+    await update.message.reply_text(
+        f"{LEFT_MSG}\n\n"
+        f"📤 Left Info\n"
+        f"👤 Name: {user.first_name}\n"
+        f"🆔 ID: {user.id}\n"
+        f"🔗 Username: {username}"
+    )
 
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    get_group_setting(update.effective_chat.id)
     await update.message.reply_text(pack_list_text())
 
 async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    get_group_setting(update.effective_chat.id)
     await update.message.reply_text(price_list_text())
 
 async def open_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    get_group_setting(update.effective_chat.id)
     await update.message.reply_text(OPEN_MSG)
 
 async def close_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    get_group_setting(update.effective_chat.id)
     await update.message.reply_text(CLOSE_MSG)
+
+async def time_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    setting = get_group_setting(update.effective_chat.id)
+    await update.message.reply_text(
+        f"⏰ လက်ရှိ Auto ဆိုင်ချိန်\n\n"
+        f"🌅 ဆိုင်ဖွင့်: {setting['open_hour']}:00\n"
+        f"🌙 ဆိုင်ပိတ်: {setting['close_hour']}:00"
+    )
+
+async def settime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    get_group_setting(update.effective_chat.id)
+
+    if len(context.args) != 2:
+        return await update.message.reply_text("Usage: /settime 8 20")
+
+    try:
+        open_hour = int(context.args[0])
+        close_hour = int(context.args[1])
+
+        if not 0 <= open_hour <= 23 or not 0 <= close_hour <= 23:
+            return await update.message.reply_text("❌ အချိန်ကို 0 ကနေ 23 ကြားထည့်ပါ")
+
+        setting = get_group_setting(update.effective_chat.id)
+        setting["open_hour"] = open_hour
+        setting["close_hour"] = close_hour
+
+        await update.message.reply_text(
+            f"✅ Auto ဆိုင်ချိန် ပြောင်းပြီးပါပြီ\n\n"
+            f"🌅 ဆိုင်ဖွင့်: {open_hour}:00\n"
+            f"🌙 ဆိုင်ပိတ်: {close_hour}:00"
+        )
+    except Exception:
+        await update.message.reply_text("❌ /settime 8 20 ပုံစံနဲ့ထည့်ပါ")
 
 async def calc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -320,12 +393,27 @@ async def warnings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.reply_to_message.from_user
     await update.message.reply_text(f"⚠️ {user.first_name} warnings: {WARNS.get(user.id, 0)}/3")
 
+async def auto_shop_time(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.datetime.now()
+    today = str(now.date())
+
+    for chat_id, setting in GROUP_SETTINGS.items():
+        if now.hour == setting["open_hour"] and setting["last_open_date"] != today:
+            await context.bot.send_message(chat_id=chat_id, text=OPEN_MSG)
+            setting["last_open_date"] = today
+
+        if now.hour == setting["close_hour"] and setting["last_close_date"] != today:
+            await context.bot.send_message(chat_id=chat_id, text=CLOSE_MSG)
+            setting["last_close_date"] = today
+
 # ================= TEXT HANDLER =================
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global USDT_RATE, PROFIT
 
     if not update.message or not update.message.text:
         return
+
+    get_group_setting(update.effective_chat.id)
 
     text = update.message.text.strip()
     lower = text.lower()
@@ -414,6 +502,8 @@ def main():
     app.add_handler(CommandHandler("price", price_cmd))
     app.add_handler(CommandHandler("open", open_cmd))
     app.add_handler(CommandHandler("close", close_cmd))
+    app.add_handler(CommandHandler("time", time_cmd))
+    app.add_handler(CommandHandler("settime", settime_cmd))
     app.add_handler(CommandHandler("calc", calc_cmd))
     app.add_handler(CommandHandler("antispam", antispam_cmd))
     app.add_handler(CommandHandler("antilink", antilink_cmd))
@@ -425,6 +515,8 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome))
     app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, left))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+
+    app.job_queue.run_repeating(auto_shop_time, interval=60, first=10)
 
     print("🔥 PUBLIC BOT RUNNING")
     app.run_polling()
