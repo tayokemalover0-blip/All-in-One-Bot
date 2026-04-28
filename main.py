@@ -24,7 +24,6 @@ from telegram.ext import (
     CallbackQueryHandler,
 )
 
-# ================= WEB SERVER FOR RENDER FREE =================
 web_app = Flask(__name__)
 
 @web_app.route("/")
@@ -35,7 +34,6 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host="0.0.0.0", port=port)
 
-# ================= BOT CONFIG =================
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("BOT_TOKEN missing")
@@ -95,7 +93,6 @@ KEYBOARD = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
-# ================= JSON SAVE =================
 def load_data():
     global GROUP_SETTINGS, WARNS
     try:
@@ -128,7 +125,6 @@ def get_group_setting(chat_id):
         save_data()
     return GROUP_SETTINGS[chat_id]
 
-# ================= ADMIN CHECK =================
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
     return member.status in ["administrator", "creator"]
@@ -139,7 +135,6 @@ async def admin_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return False
     return True
 
-# ================= CALC FUNCTIONS =================
 def round_50(amount):
     return int(math.ceil(amount / ROUND_VALUE) * ROUND_VALUE)
 
@@ -169,7 +164,6 @@ def safe_calc(expr):
         raise ValueError("bad expression")
     return eval_node(ast.parse(expr, mode="eval").body)
 
-# ================= TEXTS =================
 def pack_list_text():
     return """╔════〔 𝗣𝗨𝗕𝗟𝗜𝗖 𝗣𝗔𝗖𝗞 𝗟𝗜𝗦𝗧 〕════╗
 
@@ -237,7 +231,6 @@ def price_list_text():
     lines.append("╚════════════════════╝")
     return "\n".join(lines)
 
-# ================= SETTINGS BUTTON UI =================
 def settings_keyboard(setting):
     return InlineKeyboardMarkup([
         [
@@ -271,7 +264,6 @@ def settings_keyboard(setting):
 async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update, context):
         return
-
     setting = get_group_setting(update.effective_chat.id)
     await update.message.reply_text(
         f"⚙️ Group Settings\n\n"
@@ -285,7 +277,6 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     member = await context.bot.get_chat_member(query.message.chat.id, query.from_user.id)
     if member.status not in ["administrator", "creator"]:
         return await query.edit_message_text("❌ Admin တွေပဲ သုံးလို့ရပါတယ်။")
@@ -312,7 +303,6 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=settings_keyboard(setting)
     )
 
-# ================= COMMANDS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_group_setting(update.effective_chat.id)
     await update.message.reply_text("🤖 Public Bot Ready ပါပြီရှင့်", reply_markup=KEYBOARD)
@@ -359,7 +349,6 @@ Group Control:
 
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_group_setting(update.effective_chat.id)
-
     for user in update.message.new_chat_members:
         username = f"@{user.username}" if user.username else "No username"
         await update.message.reply_text(
@@ -372,7 +361,6 @@ async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def left(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_group_setting(update.effective_chat.id)
-
     user = update.message.left_chat_member
     username = f"@{user.username}" if user.username else "No username"
     await update.message.reply_text(
@@ -412,22 +400,17 @@ async def time_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def settime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update, context):
         return
-
     if len(context.args) != 2:
         return await update.message.reply_text("Usage: /settime 8 20")
-
     try:
         open_hour = int(context.args[0])
         close_hour = int(context.args[1])
-
         if not 0 <= open_hour <= 23 or not 0 <= close_hour <= 23:
             return await update.message.reply_text("❌ အချိန်ကို 0 ကနေ 23 ကြားထည့်ပါ")
-
         setting = get_group_setting(update.effective_chat.id)
         setting["open_hour"] = open_hour
         setting["close_hour"] = close_hour
         save_data()
-
         await update.message.reply_text(
             f"✅ Auto ဆိုင်ချိန် ပြောင်းပြီးပါပြီ\n\n"
             f"🌅 ဆိုင်ဖွင့်: {open_hour}:00\n"
@@ -494,14 +477,11 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if not update.message.reply_to_message:
         return await update.message.reply_text("⚠️ /warn ကို user message ကို reply ထောက်ပြီးသုံးပါ")
-
     user = update.message.reply_to_message.from_user
     key = f"{update.effective_chat.id}:{user.id}"
     WARNS[key] = WARNS.get(key, 0) + 1
     save_data()
-
     await update.message.reply_text(f"⚠️ {user.first_name} Warn: {WARNS[key]}/3")
-
     if WARNS[key] >= 3:
         await context.bot.restrict_chat_member(
             update.effective_chat.id,
@@ -513,14 +493,12 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def warnings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
         return await update.message.reply_text("⚠️ /warnings ကို reply ထောက်ပြီးသုံးပါ")
-
     user = update.message.reply_to_message.from_user
     key = f"{update.effective_chat.id}:{user.id}"
     await update.message.reply_text(f"⚠️ {user.first_name} warnings: {WARNS.get(key, 0)}/3")
 
-# ================= AUTO SHOP TIME =================
 async def auto_shop_time(context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.datetime.now()
+    now = datetime.datetime.utcnow() + datetime.timedelta(hours=6, minutes=30)
     today = str(now.date())
 
     for chat_id, setting in GROUP_SETTINGS.items():
@@ -534,7 +512,6 @@ async def auto_shop_time(context: ContextTypes.DEFAULT_TYPE):
             setting["last_close_date"] = today
             save_data()
 
-# ================= TEXT HANDLER =================
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global USDT_RATE, PROFIT
 
@@ -546,27 +523,21 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     lower = text.lower()
 
-    if lower == "c":
-        if not await admin_only(update, context):
-            return
-        return await update.message.reply_text(CLOSE_MSG)
-
-    if lower == "o":
+    if lower == "o" or "ဆိုင်ဖွ" in text:
         if not await admin_only(update, context):
             return
         return await update.message.reply_text(OPEN_MSG)
+
+    if lower == "c" or "ဆိုင်ပိတ်" in text:
+        if not await admin_only(update, context):
+            return
+        return await update.message.reply_text(CLOSE_MSG)
 
     if text == "📋 Pack List":
         return await list_cmd(update, context)
 
     if text == "💎 Price List":
         return await price_cmd(update, context)
-
-    if text == "🌅 ဆိုင်ဖွင့်":
-        return await open_cmd(update, context)
-
-    if text == "🌙 ဆိုင်ပိတ်":
-        return await close_cmd(update, context)
 
     if text == "⚙️ Settings":
         return await settings_cmd(update, context)
@@ -593,15 +564,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if rate_match:
         if not await admin_only(update, context):
             return
-
         rate = float(rate_match.group(1))
         profit = float(rate_match.group(2))
-
         if not 65 <= rate <= 90:
             return await update.message.reply_text("❌ Rate ကို 65 ကနေ 90 ကြားပဲ ထည့်ပါ")
         if not 1 <= profit <= 10:
             return await update.message.reply_text("❌ Profit ကို 1% ကနေ 10% ကြားပဲ ထည့်ပါ")
-
         USDT_RATE = rate
         PROFIT = profit
         return await update.message.reply_text(price_list_text())
@@ -625,7 +593,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             return
 
-# ================= MAIN =================
 def main():
     load_data()
     threading.Thread(target=run_web, daemon=True).start()
