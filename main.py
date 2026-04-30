@@ -7,6 +7,7 @@ import operator as op
 import threading
 import datetime
 from flask import Flask
+from deep_translator import GoogleTranslator
 
 from telegram import (
     Update,
@@ -89,7 +90,8 @@ KEYBOARD = ReplyKeyboardMarkup(
     [
         ["📋 Pack List", "💎 Price List"],
         ["🌅 ဆိုင်ဖွင့်", "🌙 ဆိုင်ပိတ်"],
-        ["⚙️ Settings", "ℹ️ Help"],
+        ["⚙️ Settings", "🌐 Translate"],
+        ["ℹ️ Help"],
     ],
     resize_keyboard=True,
 )
@@ -353,6 +355,11 @@ Normal Calculator:
 /calc 2+3*5
 သို့မဟုတ် 2+3*5
 
+Translate:
+/tr hello
+/translate hello
+စာကို reply ထောက်ပြီး /tr ရိုက်ပါ
+
 Diamond Calculator:
 86
 172
@@ -490,6 +497,24 @@ async def calc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_text("❌ Calculator error")
 
+async def translate_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        if update.message.reply_to_message and update.message.reply_to_message.text:
+            text = update.message.reply_to_message.text
+        elif context.args:
+            text = " ".join(context.args)
+        else:
+            return await update.message.reply_text(
+                "🌐 Translate သုံးရန်\n"
+                "စာကို reply ထောက်ပြီး /tr ရိုက်ပါ\n"
+                "သို့မဟုတ် /tr hello"
+            )
+
+        result = GoogleTranslator(source="auto", target="myanmar").translate(text)
+        await update.message.reply_text(f"🌐 Myanmar Translate:\n\n{result}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Translate error: {e}")
+
 async def mute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update, context):
         return
@@ -621,6 +646,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "⚙️ Settings":
         return await settings_cmd(update, context)
 
+    if text == "🌐 Translate":
+        return await update.message.reply_text(
+            "🌐 Translate သုံးရန်\n"
+            "စာကို reply ထောက်ပြီး /tr ရိုက်ပါ\n"
+            "သို့မဟုတ် /tr hello"
+        )
+
     if text == "ℹ️ Help":
         return await help_cmd(update, context)
 
@@ -688,20 +720,24 @@ def main():
     app.add_handler(CommandHandler("time", time_cmd))
     app.add_handler(CommandHandler("settime", settime_cmd))
     app.add_handler(CommandHandler("calc", calc_cmd))
+    app.add_handler(CommandHandler("tr", translate_cmd))
+    app.add_handler(CommandHandler("translate", translate_cmd))
     app.add_handler(CommandHandler("mute", mute_cmd))
     app.add_handler(CommandHandler("unmute", unmute_cmd))
     app.add_handler(CommandHandler("warn", warn_cmd))
     app.add_handler(CommandHandler("warnings", warnings_cmd))
 
-    app.add_handler(CallbackQueryHandler(settings_callback)) 
-    
-    app.add_handler(ChatMemberHandler(member_status, ChatMemberHandler.CHAT_MEMBER))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_handler(CallbackQueryHandler(settings_callback))
+
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome), group=0)
+    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, left), group=0)
+    app.add_handler(ChatMemberHandler(member_status, ChatMemberHandler.CHAT_MEMBER), group=0)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler), group=1)
 
     app.job_queue.run_repeating(auto_shop_time, interval=60, first=10)
 
     print("🔥 PUBLIC BOT RUNNING")
-    app.run_polling()
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
