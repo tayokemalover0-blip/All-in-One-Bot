@@ -62,12 +62,27 @@ CLOSE_MSG = """🌙 ဒီနေ့အတွက် order လက်ခံမှ�
 မနက်ဖြန်ပြန်လည်ဖွင့်လှစ်ပေးပါမယ် 💎
 အားပေးမှုအတွက် ကျေးဇူးအများကြီးတင်ပါတယ် 🙏"""
 
-WELCOME_MSG = """👋 Hello ကြိုဆိုပါတယ်ရှင့်
+WELCOME_MSG = """╔════〔 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 〕════╗
 
-💎 Diamond / UC / Bundle / Pass များ မေးမြန်းနိုင်ပါတယ်ရှင့်
-✅ Bot Ready ပါပြီ"""
+👋 Hello! Welcome to our group
 
-LEFT_MSG = "👋 Goodbye ပါရှင့်"
+💎 Diamond / UC / Bundle / Pass
+🌐 Translator
+🧮 Calculator
+⚙️ Group Helper
+
+✅ Enjoy your stay!
+
+╚════════════════════╝"""
+
+LEFT_MSG = """╔════〔 𝗚𝗢𝗢𝗗𝗕𝗬𝗘 〕════╗
+
+👋 A member left the group
+
+🙏 Thanks for joining us.
+Hope to see you again!
+
+╚════════════════════╝"""
 
 BAD_WORDS = ["spam", "scam", "xxx", "fuck", "http://", "https://", "t.me/", "www."]
 
@@ -127,6 +142,14 @@ def get_group_setting(chat_id):
         }
         save_data()
     return GROUP_SETTINGS[chat_id]
+
+def user_info_text(user):
+    username = f"@{user.username}" if user.username else "No username"
+    return (
+        f"👤 Name: {user.first_name}\n"
+        f"🆔 ID: {user.id}\n"
+        f"🔗 Username: {username}"
+    )
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
@@ -312,8 +335,10 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data.startswith("open_"):
         setting["open_hour"] = int(query.data.split("_")[1])
+        setting["last_open_date"] = None
     elif query.data.startswith("close_"):
         setting["close_hour"] = int(query.data.split("_")[1])
+        setting["last_close_date"] = None
     elif query.data == "toggle_spam":
         setting["anti_spam"] = not setting.get("anti_spam", True)
     elif query.data == "toggle_link":
@@ -382,59 +407,45 @@ Group Control:
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_group_setting(update.effective_chat.id)
     for user in update.message.new_chat_members:
-        username = f"@{user.username}" if user.username else "No username"
         await update.message.reply_text(
-            f"{WELCOME_MSG}\n\n"
-            f"📥 Join Info\n"
-            f"👤 Name: {user.first_name}\n"
-            f"🆔 ID: {user.id}\n"
-            f"🔗 Username: {username}"
+            f"{WELCOME_MSG}\n\n📥 Join Info\n{user_info_text(user)}"
         )
 
 async def left(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_group_setting(update.effective_chat.id)
     user = update.message.left_chat_member
-    username = f"@{user.username}" if user.username else "No username"
-    await update.message.reply_text(
-        f"{LEFT_MSG}\n\n"
-        f"📤 Left Info\n"
-        f"👤 Name: {user.first_name}\n"
-        f"🆔 ID: {user.id}\n"
-        f"🔗 Username: {username}"
-    )
+    if user:
+        await update.message.reply_text(
+            f"{LEFT_MSG}\n\n📤 Left Info\n{user_info_text(user)}"
+        )
 
 async def member_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.chat_member:
+        return
+
     chat = update.effective_chat
     old = update.chat_member.old_chat_member.status
     new = update.chat_member.new_chat_member.status
     user = update.chat_member.new_chat_member.user
 
+    if user.is_bot:
+        return
+
     get_group_setting(chat.id)
 
-    username = f"@{user.username}" if user.username else "No username"
+    joined = old in ["left", "kicked"] and new in ["member", "administrator", "creator", "restricted"]
+    lefted = old in ["member", "administrator", "creator", "restricted"] and new in ["left", "kicked"]
 
-    if old in ["left", "kicked"] and new in ["member", "administrator", "creator", "restricted"]:
+    if joined:
         await context.bot.send_message(
             chat_id=chat.id,
-            text=(
-                f"{WELCOME_MSG}\n\n"
-                f"📥 Join Info\n"
-                f"👤 Name: {user.first_name}\n"
-                f"🆔 ID: {user.id}\n"
-                f"🔗 Username: {username}"
-            )
+            text=f"{WELCOME_MSG}\n\n📥 Join Info\n{user_info_text(user)}"
         )
 
-    elif old in ["member", "administrator", "creator", "restricted"] and new in ["left", "kicked"]:
+    if lefted:
         await context.bot.send_message(
             chat_id=chat.id,
-            text=(
-                f"{LEFT_MSG}\n\n"
-                f"📤 Left Info\n"
-                f"👤 Name: {user.first_name}\n"
-                f"🆔 ID: {user.id}\n"
-                f"🔗 Username: {username}"
-            )
+            text=f"{LEFT_MSG}\n\n📤 Left Info\n{user_info_text(user)}"
         )
 
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -448,12 +459,18 @@ async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def open_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update, context):
         return
+    setting = get_group_setting(update.effective_chat.id)
+    setting["last_open_date"] = str((datetime.datetime.utcnow() + datetime.timedelta(hours=6, minutes=30)).date())
+    save_data()
     await open_group_permissions(context.bot, update.effective_chat.id)
     await update.message.reply_text(OPEN_MSG)
 
 async def close_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update, context):
         return
+    setting = get_group_setting(update.effective_chat.id)
+    setting["last_close_date"] = str((datetime.datetime.utcnow() + datetime.timedelta(hours=6, minutes=30)).date())
+    save_data()
     await update.message.reply_text(CLOSE_MSG)
     await close_group_permissions(context.bot, update.effective_chat.id)
 
@@ -478,6 +495,8 @@ async def settime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         setting = get_group_setting(update.effective_chat.id)
         setting["open_hour"] = open_hour
         setting["close_hour"] = close_hour
+        setting["last_open_date"] = None
+        setting["last_close_date"] = None
         save_data()
         await update.message.reply_text(
             f"✅ Auto ဆိုင်ချိန် ပြောင်းပြီးပါပြီ\n\n"
@@ -601,18 +620,29 @@ async def auto_shop_time(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.datetime.utcnow() + datetime.timedelta(hours=6, minutes=30)
     today = str(now.date())
 
-    for chat_id, setting in GROUP_SETTINGS.items():
-        if now.hour == setting["open_hour"] and setting["last_open_date"] != today:
-            await open_group_permissions(context.bot, chat_id)
-            await context.bot.send_message(chat_id=chat_id, text=OPEN_MSG)
-            setting["last_open_date"] = today
-            save_data()
+    for chat_id, setting in list(GROUP_SETTINGS.items()):
+        try:
+            if (
+                now.hour == setting["open_hour"]
+                and now.minute == 0
+                and setting.get("last_open_date") != today
+            ):
+                await open_group_permissions(context.bot, chat_id)
+                await context.bot.send_message(chat_id=chat_id, text=OPEN_MSG)
+                setting["last_open_date"] = today
+                save_data()
 
-        if now.hour == setting["close_hour"] and setting["last_close_date"] != today:
-            await context.bot.send_message(chat_id=chat_id, text=CLOSE_MSG)
-            await close_group_permissions(context.bot, chat_id)
-            setting["last_close_date"] = today
-            save_data()
+            if (
+                now.hour == setting["close_hour"]
+                and now.minute == 0
+                and setting.get("last_close_date") != today
+            ):
+                await context.bot.send_message(chat_id=chat_id, text=CLOSE_MSG)
+                await close_group_permissions(context.bot, chat_id)
+                setting["last_close_date"] = today
+                save_data()
+        except Exception as e:
+            print(f"Auto shop error in {chat_id}: {e}")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global USDT_RATE, PROFIT
